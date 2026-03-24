@@ -1,4 +1,5 @@
 cologne_isochrone.png
+cache/
 __pycache__/
 *.pyc
 *.pyo

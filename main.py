@@ -13,7 +13,10 @@ Output:
     cologne_isochrone.png  (300 DPI)
 """
 
+import os
 import sys
+import threading
+import time
 import warnings
 import numpy as np
 import geopandas as gpd
@@ -38,6 +41,8 @@ GRID_M          = 250                # raster cell size in metres
 SMOOTH_SIGMA    = 2.0                # gaussian smoothing (grid cells)
 OUTPUT_FILE     = "cologne_isochrone.png"
 DPI             = 300
+CACHE_DIR       = "cache"
+GRAPH_CACHE     = os.path.join(CACHE_DIR, "cologne_network.graphml")
 
 # Max speeds by OSM highway type (km/h) — capped at 80 km/h
 EMERGENCY_SPEEDS = {
@@ -58,6 +63,36 @@ EMERGENCY_SPEEDS = {
     "road":           50,
 }
 FALLBACK_SPEED = 50   # km/h for unmapped types
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Progress indicator
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ProgressPrinter:
+    """Context manager that prints elapsed time every 5 s during a slow step."""
+
+    def __init__(self, label: str):
+        self.label   = label
+        self._stop   = threading.Event()
+        self._start  = 0.0
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def __enter__(self):
+        self._start = time.monotonic()
+        self._thread.start()
+        return self
+
+    def _run(self):
+        while not self._stop.wait(5):
+            elapsed = time.monotonic() - self._start
+            print(f"    … {self.label} ({elapsed:.0f}s elapsed)", flush=True)
+
+    def __exit__(self, *_):
+        self._stop.set()
+        self._thread.join()
+        elapsed = time.monotonic() - self._start
+        print(f"    done in {elapsed:.1f}s")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -93,8 +128,7 @@ def get_cologne_boundary() -> gpd.GeoDataFrame:
 
 
 def download_network(cologne_gdf: gpd.GeoDataFrame):
-    """Download the driving network for Cologne + BUFFER_M metres."""
-    print(f"[3/5] Downloading road network (Cologne + {BUFFER_M/1000:.0f} km buffer) …")
+    """Download (or load from cache) the driving network for Cologne + BUFFER_M metres."""
     cologne_proj = cologne_gdf.to_crs("EPSG:25832")
     buffered_m   = cologne_proj.geometry.iloc[0].buffer(BUFFER_M)
     buffered_wgs = (
@@ -103,10 +137,18 @@ def download_network(cologne_gdf: gpd.GeoDataFrame):
         .geometry.iloc[0]
     )
 
-    G = ox.graph_from_polygon(buffered_wgs, network_type="drive", retain_all=True)
-    node_count = G.number_of_nodes()
-    edge_count = G.number_of_edges()
-    print(f"    → {node_count:,} nodes, {edge_count:,} edges")
+    if os.path.exists(GRAPH_CACHE):
+        print(f"[3/5] Loading cached road network ({GRAPH_CACHE}) …")
+        G = ox.load_graphml(GRAPH_CACHE)
+    else:
+        print(f"[3/5] Downloading road network (Cologne + {BUFFER_M/1000:.0f} km buffer) …")
+        with ProgressPrinter("downloading"):
+            G = ox.graph_from_polygon(buffered_wgs, network_type="drive", retain_all=True)
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        ox.save_graphml(G, GRAPH_CACHE)
+        print(f"    cached → {GRAPH_CACHE}")
+
+    print(f"    → {G.number_of_nodes():,} nodes, {G.number_of_edges():,} edges")
     return G, buffered_wgs
 
 
