@@ -2,8 +2,8 @@
 Cologne Isochrone Flood-Fill Map
 =================================
 Generates a presentation-quality raster isochrone map of Cologne.
-Travel times are computed from a single starting point using emergency-vehicle
-(max) speeds on each road type, then flood-filled across the entire map via
+Travel times are computed from a single starting point using per-road-type
+speeds capped at 80 km/h, then flood-filled across the entire map via
 nearest-neighbour interpolation.
 
 Usage:
@@ -39,23 +39,23 @@ SMOOTH_SIGMA    = 2.0                # gaussian smoothing (grid cells)
 OUTPUT_FILE     = "cologne_isochrone.png"
 DPI             = 300
 
-# Emergency-vehicle max speeds by OSM highway type (km/h)
+# Max speeds by OSM highway type (km/h) — capped at 80 km/h
 EMERGENCY_SPEEDS = {
-    "motorway":       130,
-    "motorway_link":  110,
-    "trunk":          110,
-    "trunk_link":      90,
-    "primary":         90,
-    "primary_link":    80,
-    "secondary":       80,
-    "secondary_link":  70,
-    "tertiary":        70,
-    "tertiary_link":   60,
-    "unclassified":    60,
-    "residential":     60,
-    "living_street":   40,
-    "service":         30,
-    "road":            60,
+    "motorway":       80,
+    "motorway_link":  80,
+    "trunk":          80,
+    "trunk_link":     80,
+    "primary":        80,
+    "primary_link":   70,
+    "secondary":      70,
+    "secondary_link": 60,
+    "tertiary":       60,
+    "tertiary_link":  50,
+    "unclassified":   50,
+    "residential":    50,
+    "living_street":  30,
+    "service":        30,
+    "road":           50,
 }
 FALLBACK_SPEED = 50   # km/h for unmapped types
 
@@ -142,8 +142,8 @@ def assign_travel_times(G) -> None:
         road_speed     = EMERGENCY_SPEEDS.get(highway, FALLBACK_SPEED)
 
         if maxspeed_km:
-            # Emergency vehicles go ~30 % above posted limit (min: road type table)
-            speed = max(maxspeed_km * 1.3, road_speed)
+            # Use the higher of tagged speed and road-type table, capped at 80 km/h
+            speed = min(max(maxspeed_km, road_speed), 80)
         else:
             speed = road_speed
 
